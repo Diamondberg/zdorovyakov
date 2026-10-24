@@ -1,0 +1,11 @@
+{
+  "name": "zdorovyakov",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "test": "node scripts/check-project.mjs",
+    "audit:local": "node scripts/audit-local.mjs"
+  }
+}

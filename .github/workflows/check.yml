@@ -1,0 +1,21 @@
+name: Project checks
+on:
+  push:
+    branches: [main, feature/zdorovyakov-mvp]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  scaffold:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: node --check scripts/audit-local.mjs
+      - run: node --check scripts/check-project.mjs

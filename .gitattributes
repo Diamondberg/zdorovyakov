@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
+*.pdf binary
+# Original specification uses Markdown two-space hard line breaks.
+docs/project/MASTER_SPEC.md whitespace=-blank-at-eol
