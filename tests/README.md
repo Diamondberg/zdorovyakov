@@ -1,6 +1,6 @@
 # Проверки
 
-`npm test`: каркас → typecheck → 11 unit-проверок → 10 PostgreSQL/API-сценариев.
+`npm test`: каркас → typecheck API/React → 11 unit → 18 PostgreSQL/API-сценариев.
 `npm run build`: компиляция TypeScript и копирование SQL для скомпилированного runner.
 Все контакты в fixtures синтетические, с доменом .invalid; реальные данные не нужны.
 
@@ -27,3 +27,6 @@ CI использует postgres:18 service и npm ci --ignore-scripts.
 
 Позже: TTL/попытки email-кода, серверная авторизация, CSRF, статусы, возвраты,
 повторные покупки, экспорт с защитой CSV-формул, мобильный сценарий и восстановление БД.
+
+Этап 3: серверная авторизация/CSRF/статусы уже покрыты integration tests;
+вход, списки, поиск/empty-state, drawer и история проверены также в браузере.

@@ -64,10 +64,15 @@ OrderEvents/NotificationEvents; Products M:N Promotions через PromotionProd
   определить отдельно после проверки применимых требований.
 
 На PostgreSQL проверены миграции, CHECK, снимки, идемпотентность, конкуренция и
-транзакционное сохранение outbox. Сервисы email/статусов/отгрузок пока не реализованы:
-наличие таблиц не означает готовность последующих этапов.
+транзакционное сохранение outbox. На этапе 3 реализованы статусы/платежи/отгрузки
+и админские сессии. Email-коды и worker остаются будущими этапами.
 Бонусные балансы и реферальные таблицы в MVP не вводятся.
 
 Orders хранит items_subtotal_minor (до скидки), discount_minor и items_total_minor
 (после скидки). Округление sale_unit_price_minor до копейки half-up, затем умножение
 на количество; снимок закупочной цены остаётся внутренним.
+
+003_admin.sql добавляет optimistic version в customers/orders/products/promotions,
+customer_email_changes (pending email без изменения подтверждённого контакта)
+и append-only order_comments с author FK и временем. Новый owner создаётся только
+явной локальной bootstrap-командой, seed-паролей нет.

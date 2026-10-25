@@ -3,13 +3,14 @@
 Единая торговая платформа: одно ядро, одна PostgreSQL, много витрин.
 Первый канал продаж — водный-прополис.рф.
 
-Состояние на 25.10.2026: этап 2 — центральное ядро. Есть Fastify API,
-миграции PostgreSQL, каталог, серверный расчёт корзины и внутренний сервис заказа.
-Админка, витрина и публичное оформление ещё не реализованы.
+Состояние на 25.10.2026: ядро и локальная админка (этапы 2–3) реализованы.
+Есть PostgreSQL-миграции, каталог/расчёт, клиенты, заказы, цены/акции, статусы,
+подтверждение оплаты и аудит. Витрина и публичное оформление ещё не реализованы.
 
 Начать новую сессию с [HANDOFF.md](HANDOFF.md) и [PROGRESS.md](PROGRESS.md).
 Полное ТЗ: [docs/project/MASTER_SPEC.md](docs/project/MASTER_SPEC.md).
-Отчёт: [docs/reports/STAGE_02_REPORT.md](docs/reports/STAGE_02_REPORT.md).
+Отчёт: [docs/reports/STAGE_03_REPORT.md](docs/reports/STAGE_03_REPORT.md).
+Админка: [docs/project/ADMIN.md](docs/project/ADMIN.md).
 
 ## Локальные проверки
 
@@ -53,7 +54,7 @@ API и примеры запросов: [docs/project/API.md](docs/project/API.m
 ```text
 apps/api/                  центральный backend
 apps/worker/               обработчик очереди (этап 6)
-apps/admin/                центральная админка (этап 3)
+apps/admin/                локальная центральная админка
 apps/storefront/           первая витрина (этап 4, после согласования макета)
 packages/contracts/        публичные JSON Schema и DTO
 db/migrations/             последовательные SQL-миграции

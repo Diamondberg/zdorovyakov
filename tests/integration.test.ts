@@ -10,6 +10,7 @@ import { migrate, migrationsDir, transaction } from '../db/migrate.js';
 import { buildApp } from '../apps/api/src/app.js';
 import { savePromotion } from '../apps/api/src/promotions.js';
 import { createOrder, type InternalOrderInput } from '../apps/api/src/orders.js';
+import { passwordHash,digest } from '../apps/api/src/admin/auth.js';
 
 let db:Awaited<ReturnType<typeof testPostgres>>;
 let app:Awaited<ReturnType<typeof buildApp>>;
@@ -22,7 +23,7 @@ const approvedOrigin='https://xn----ctbgrdnlgeajblt4l.xn--p1ai';
 before(async () => {
   db=await testPostgres();
   console.log(`Integration database: ${(await db.pool.query('SHOW server_version')).rows[0].server_version}; loopback only; generated ephemeral credentials.`);
-  assert.deepEqual(await migrate(db.pool),['001_core.sql','002_initial_catalog.sql']);
+  assert.deepEqual(await migrate(db.pool),['001_core.sql','002_initial_catalog.sql','003_admin.sql']);
   productId=(await db.pool.query('SELECT id FROM products')).rows[0].id;
   app=await buildApp(db.pool);
 }, {timeout:120000});
@@ -33,10 +34,10 @@ test('migration repeat/concurrency, checksum and failure rollback',async () => {
   assert.deepEqual(await Promise.all([migrate(db.pool),migrate(db.pool)]),[[],[]]);
   const scratch=await mkdtemp(join(tmpdir(),'zdorovyakov-migrations-'));
   for(const name of await readdir(migrationsDir)) if(name.endsWith('.sql')) await copyFile(join(migrationsDir,name),join(scratch,name));
-  await writeFile(join(scratch,'003_broken.sql'),'CREATE TABLE rollback_probe (id int); SELECT * FROM missing_table_for_test;');
+  await writeFile(join(scratch,'004_broken.sql'),'CREATE TABLE rollback_probe (id int); SELECT * FROM missing_table_for_test;');
   await assert.rejects(migrate(db.pool,scratch));
   assert.equal((await db.pool.query("SELECT to_regclass('rollback_probe') AS value")).rows[0].value,null);
-  assert.equal((await db.pool.query('SELECT count(*) FROM schema_migrations')).rows[0].count,'2');
+  assert.equal((await db.pool.query('SELECT count(*) FROM schema_migrations')).rows[0].count,'3');
   await writeFile(join(scratch,'001_core.sql'),'-- altered historical migration');
   await assert.rejects(migrate(db.pool,scratch),/checksum mismatch/);
 });
@@ -181,4 +182,109 @@ test('real HTTP listener serves health and catalogue on loopback',async () => {
   const catalogue=await fetch(`${address}${base}/products`);
   assert.equal(catalogue.status,200);
   assert.equal((await catalogue.json()).length,2);
+});
+
+const adminBase='/api/v1/admin';
+const adminOrigin='http://127.0.0.1:3000';
+let ownerCookie:string;let ownerCsrf:string;let managerCookie:string;let managerCsrf:string;let adminOrderId:string;let adminCustomerId:string;
+async function adminRequest(method:'GET'|'POST'|'PATCH'|'PUT',url:string,payload?:object,manager=false) {
+  return app.inject({method,url:adminBase+url,headers:{origin:adminOrigin,cookie:manager?managerCookie:ownerCookie,'x-csrf-token':manager?managerCsrf:ownerCsrf},payload});
+}
+test('admin login uses hashed sessions, secure cookies, exact origin and CSRF',async()=>{
+  for(const role of ['owner','manager']) await db.pool.query('INSERT INTO admin_users(email,password_hash,role) VALUES ($1,$2,$3)',[`${role}@example.invalid`,await passwordHash('Synthetic passphrase for tests only'),role]);
+  assert.equal((await app.inject({url:adminBase+'/orders'})).statusCode,401);
+  assert.equal((await app.inject({method:'POST',url:adminBase+'/auth/login',headers:{origin:'https://evil.example'},payload:{email:'owner@example.invalid',password:'Synthetic passphrase for tests only'}})).statusCode,403);
+  const login=async(role:string)=>app.inject({method:'POST',url:adminBase+'/auth/login',headers:{origin:adminOrigin},payload:{email:`${role}@example.invalid`,password:'Synthetic passphrase for tests only'}});
+  const a=await login('owner');assert.equal(a.statusCode,200);
+  const cookie=String(a.headers['set-cookie']);assert(cookie.includes('HttpOnly')&&cookie.includes('Secure')&&cookie.includes('SameSite=Strict'));
+  ownerCookie=cookie.split(';')[0]!;ownerCsrf=a.json().csrfToken;
+  const b=await login('manager');assert.equal(b.statusCode,200);managerCookie=String(b.headers['set-cookie']).split(';')[0]!;managerCsrf=b.json().csrfToken;
+  const token=ownerCookie.split('=')[1]!;
+  assert.equal((await db.pool.query('SELECT count(*) FROM admin_sessions WHERE token_hash=$1',[token])).rows[0].count,'0');
+  assert.equal((await db.pool.query('SELECT count(*) FROM admin_sessions WHERE token_hash=$1',[digest(token)])).rows[0].count,'1');
+  assert.equal((await adminRequest('GET','/auth/me')).json().csrfToken,ownerCsrf);
+  assert.equal((await app.inject({method:'POST',url:adminBase+'/auth/logout',headers:{origin:adminOrigin,cookie:ownerCookie}})).statusCode,403);
+  assert.equal((await app.inject({url:adminBase+'/orders',headers:{origin:'https://evil.example',cookie:ownerCookie}})).statusCode,403);
+});
+test('admin list/search and dashboard exclude unpaid applications from revenue',async()=>{
+  const result=await createOrder(db.pool,order({verifiedEmail:{email:'admin-fixture@example.invalid',verifiedAt:new Date(Date.now()-1000)}}));adminOrderId=result.id;
+  adminCustomerId=(await db.pool.query('SELECT customer_id FROM orders WHERE id=$1',[result.id])).rows[0].customer_id;
+  const rows=await adminRequest('GET','/orders?search='+encodeURIComponent(result.number));assert.equal(rows.statusCode,200);assert.equal(rows.json().items.length,1);
+  const data=await adminRequest('GET','/summary');assert.equal(data.statusCode,200);assert.equal(data.json().receivedTodayMinor,0);assert(data.json().awaitingPayment>0);
+  const waiting=(await adminRequest('GET','/orders?attention=awaiting_payment')).json();assert.equal(waiting.total,data.json().awaitingPayment);
+  const detail=await adminRequest('GET',`/orders/${adminOrderId}`);assert(!detail.body.includes('purchase_unit_price_minor'));assert(!detail.body.includes('request_hash'));
+  assert.equal((await adminRequest('GET','/products',undefined,true)).body.includes('purchase_price_minor'),false);
+});
+test('customer edits preserve confirmed email, require re-verification and do not rewrite order snapshots',async()=>{
+  const before=(await adminRequest('GET',`/customers/${adminCustomerId}`)).json();
+  const response=await adminRequest('PATCH',`/customers/${adminCustomerId}`,{version:1,firstName:'Edited fixture',phone:'8 (999) 000-00-00',email:'pending-fixture@example.invalid',notes:'Synthetic note',address:{country:'Test',city:'Updated fixture city',address:'Updated fixture address'}});
+  assert.equal(response.statusCode,200);assert.equal(response.json().version,2);assert.equal(response.json().duplicatePhone,true);
+  const after=(await adminRequest('GET',`/customers/${adminCustomerId}`)).json();assert.equal(after.pendingEmail.pending_email,'pending-fixture@example.invalid');
+  assert.equal(after.contacts.find((c:{kind:string})=>c.kind==='email').normalized_value,before.contacts.find((c:{kind:string})=>c.kind==='email').normalized_value);
+  assert.equal((await adminRequest('GET',`/orders/${adminOrderId}`)).json().recipient_snapshot.firstName,'Synthetic');
+  assert.equal((await adminRequest('PATCH',`/customers/${adminCustomerId}`,{version:1,notes:'Stale'})).statusCode,409);
+  assert.equal((await adminRequest('PATCH',`/customers/${adminCustomerId}`,{version:2,email:'synthetic-customer@example.invalid'})).statusCode,409);
+});
+test('manual payment requires owner, explicit confirmation, exact known amount and audit',async()=>{
+  const edit=await adminRequest('PATCH',`/orders/${adminOrderId}`,{version:1,shippingMinor:10000,carrier:'Test carrier',trackingNumber:'FIXTURE-TRACK'});assert.equal(edit.statusCode,200);
+  const request={version:2,kind:'payment',value:'paid',confirm:true,amountMinor:433000};
+  assert.equal((await adminRequest('POST',`/orders/${adminOrderId}/status`,request,true)).statusCode,403);
+  assert.equal((await adminRequest('POST',`/orders/${adminOrderId}/status`,{...request,confirm:false})).statusCode,400);
+  assert.equal((await adminRequest('POST',`/orders/${adminOrderId}/status`,{...request,amountMinor:1})).statusCode,409);
+  const paid=await adminRequest('POST',`/orders/${adminOrderId}/status`,request);assert.equal(paid.statusCode,200);
+  assert.equal((await adminRequest('GET','/summary')).json().receivedTodayMinor,433000);
+  assert.equal((await adminRequest('POST',`/orders/${adminOrderId}/status`,request)).statusCode,409);
+  assert.equal((await db.pool.query("SELECT count(*) FROM payments WHERE order_id=$1 AND kind='payment'",[adminOrderId])).rows[0].count,'1');
+  assert.equal((await adminRequest('PATCH',`/orders/${adminOrderId}`,{version:3,shippingMinor:0})).statusCode,409);
+});
+test('processing/delivery transitions retain actor/time/previous value and protect shipped snapshots',async()=>{
+  let v=3;
+  assert.equal((await adminRequest('POST',`/orders/${adminOrderId}/status`,{version:v,kind:'processing',value:'assembled'})).statusCode,409);
+  for(const value of ['confirmed','assembling','assembled']) {const r=await adminRequest('POST',`/orders/${adminOrderId}/status`,{version:v,kind:'processing',value},true);assert.equal(r.statusCode,200);v++;}
+  assert.equal((await adminRequest('GET','/summary')).json().readyToShip,1);
+  assert.equal((await adminRequest('GET','/orders?attention=ready_to_ship')).json().total,1);
+  for(const value of ['prepared','shipped','in_transit','delivered']) {const r=await adminRequest('POST',`/orders/${adminOrderId}/status`,{version:v,kind:'delivery',value},true);assert.equal(r.statusCode,200);v++;}
+  const detail=(await adminRequest('GET',`/orders/${adminOrderId}`)).json();
+  assert.equal(detail.storefront_name,'Водный прополис');
+  const transition=detail.events.find((e:{from_status:string;to_status:string})=>e.from_status==='shipped'&&e.to_status==='in_transit');assert(transition.actor&&transition.created_at);
+  assert.equal(detail.payment_status,'paid');assert.equal(detail.processing_status,'assembled');
+  assert.equal((await adminRequest('PATCH',`/orders/${adminOrderId}`,{version:v,shipping:{country:'Test',city:'New',address:'Forbidden rewrite'}})).statusCode,409);
+  assert.equal((await adminRequest('POST',`/orders/${adminOrderId}/comments`,{body:'Synthetic operator comment'},true)).statusCode,200);
+  assert.equal((await adminRequest('GET',`/orders/${adminOrderId}`)).json().comments.length,1);
+  await assert.rejects(db.pool.query("UPDATE shipments SET address_snapshot='{}' WHERE order_id=$1",[adminOrderId]));
+});
+test('product prices and campaign configuration are owner-only and version checked',async()=>{
+  const product=(await adminRequest('GET','/products')).json().find((p:{id:string})=>p.id===productId);
+  const change={version:product.version,retailPriceMinor:49000,purchasePriceMinor:28000};
+  assert.equal((await adminRequest('PATCH',`/products/${productId}/price`,change,true)).statusCode,403);
+  assert.equal((await adminRequest('PATCH',`/products/${productId}/price`,change)).statusCode,200);
+  assert.equal((await adminRequest('PATCH',`/products/${productId}/price`,change)).statusCode,409);
+  assert.equal((await db.pool.query('SELECT sale_unit_price_minor FROM order_items WHERE order_id=$1',[adminOrderId])).rows[0].sale_unit_price_minor,'47000');
+  const next={name:'Admin fixture',startsAt:new Date(Date.now()+86400000).toISOString(),endsAt:new Date(Date.now()+172800000).toISOString(),active:false,productIds:[productId],rules:[{minQuantity:6,discountBps:1000}]};
+  assert.equal((await adminRequest('POST','/promotions',next,true)).statusCode,403);
+  const created=await adminRequest('POST','/promotions',next);assert.equal(created.statusCode,200);
+  assert.equal((await adminRequest('PUT',`/promotions/${created.json().id}`,{...next,version:1})).statusCode,200);
+  assert.equal((await adminRequest('PUT',`/promotions/${created.json().id}`,{...next,version:1})).statusCode,409);
+  assert.equal((await adminRequest('GET','/audit',undefined,true)).statusCode,403);
+  const log=(await adminRequest('GET','/audit')).json();assert(log.some((e:{action:string;actor:string})=>e.action==='order.payment.changed'&&e.actor==='owner@example.invalid'));
+  assert(!JSON.stringify(log).includes('Synthetic passphrase'));
+});
+test('login throttling persists in PostgreSQL and revoked sessions fail',async()=>{
+  for(let i=0;i<10;i++) assert.equal((await app.inject({method:'POST',url:adminBase+'/auth/login',remoteAddress:'192.0.2.5',headers:{origin:adminOrigin},payload:{email:'missing@example.invalid',password:'Wrong synthetic password'}})).statusCode,401);
+  assert.equal((await app.inject({method:'POST',url:adminBase+'/auth/login',remoteAddress:'192.0.2.5',headers:{origin:adminOrigin},payload:{email:'missing@example.invalid',password:'Wrong synthetic password'}})).statusCode,429);
+  assert.equal((await adminRequest('POST','/auth/logout')).statusCode,200);
+  assert.equal((await adminRequest('GET','/auth/me')).statusCode,401);
+  await db.pool.query("UPDATE admin_users SET active=false WHERE email='manager@example.invalid'");
+  assert.equal((await adminRequest('GET','/auth/me',undefined,true)).statusCode,401);
+});
+
+test('expired admin sessions and static path traversal are rejected',async()=>{
+  await db.pool.query("UPDATE admin_users SET active=true WHERE email='manager@example.invalid'");
+  const response=await app.inject({method:'POST',url:adminBase+'/auth/login',remoteAddress:'192.0.2.6',headers:{origin:adminOrigin},payload:{email:'manager@example.invalid',password:'Synthetic passphrase for tests only'}});
+  assert.equal(response.statusCode,200);
+  const cookie=String(response.headers['set-cookie']).split(';')[0]!;
+  const raw=cookie.split('=')[1]!;
+  await db.pool.query("UPDATE admin_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE token_hash=$1",[digest(raw)]);
+  assert.equal((await app.inject({url:adminBase+'/customers',headers:{cookie}})).statusCode,401);
+  assert.equal((await app.inject({url:'/admin/%2e%2e/%2e%2e/package.json'})).statusCode,404);
 });
