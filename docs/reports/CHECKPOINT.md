@@ -1,4 +1,24 @@
-# Контрольная точка этапа 1
+# Контрольные точки
+
+## Этап 2 — 25.10.2026
+
+- Рабочая ветка: feature/zdorovyakov-mvp.
+- Коммит ядра: 38634d80cd777e5baf47dff92f9ea57a3e2dbd9d.
+- `git push origin feature/zdorovyakov-mvp`: exit 0.
+- Удалённый SHA рабочей ветки совпал с локальным (git ls-remote).
+- main неизменна: eb2ee90abc56155e8bf4e5af2ac5fda42d3bdfb2, слияния не было.
+- npm test: PASS, 11 unit + 10 integration на PostgreSQL 18.4, без skips.
+- TypeScript strict, build, git diff --check и staged diff --check: PASS.
+- Секреты и данные реальных покупателей не публиковались.
+- Remote CI ядра запущен: https://github.com/Diamondberg/zdorovyakov/actions/runs/40169452185;
+  при первичной проверке in_progress. Локальный PASS не заменяет Actions.
+- Следующая задача: этап 3, серверная авторизация администратора и API управления;
+  перед вёрсткой — нарисованный макет и согласование владельца.
+
+Документационная квитанция сохраняется следующим коммитом; текущий последний
+SHA определять `git rev-parse HEAD` и сверять с удалённой рабочей веткой.
+
+## Этап 1
 
 Дата: 24.10.2026, Asia/Tomsk.
 
