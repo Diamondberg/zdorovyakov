@@ -1,5 +1,24 @@
 # Контрольные точки
 
+## Этап 3 — 25.10.2026
+
+- Коммит админки: 26a15b72853eacd423b1f4d4516c8873d9040807.
+- Push feature/zdorovyakov-mvp: успешен, exit 0, удалённый SHA сверён.
+- main: eb2ee90abc56155e8bf4e5af2ac5fda42d3bdfb2, без изменений/слияния.
+- 11 unit + 18 integration PASS на PostgreSQL 18.4; build и typecheck PASS.
+- npm audit --omit=dev: 0 vulnerabilities; diff/index check PASS.
+- GitHub Actions ядра этапа 3: SUCCESS,
+  https://github.com/Diamondberg/zdorovyakov/actions/runs/40199848932 (26a15b7).
+- Browser QA: вход, сводка, список/поиск/empty-state, drawer и история статуса;
+  desktop/узкий layout. Скриншоты только с синтетическими данными.
+- `.env`, tmp/preview-login.json, локальные credentials и БД исключены из Git.
+- Публичного deployment, DNS и реальной почты не было.
+- Следующая задача: новая концепция первого экрана монопродуктового лендинга.
+  Все предыдущие варианты витрины отклонены; вёрстка до согласования запрещена.
+
+Эта квитанция и последующие дизайн-изменения сохраняются отдельным doc/design
+коммитом; актуальный SHA определять через HEAD и ls-remote рабочей ветки.
+
 ## Этап 2 — 25.10.2026
 
 - Рабочая ветка: feature/zdorovyakov-mvp.
