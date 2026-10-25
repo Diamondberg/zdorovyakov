@@ -3,9 +3,34 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
-    "test": "node scripts/check-project.mjs",
+    "test": "node scripts/check-project.mjs && npm run typecheck && npm run test:unit && npm run test:integration",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && node scripts/copy-migrations.mjs",
+    "test:unit": "node --import tsx --test tests/pricing.test.ts",
+    "test:integration": "node --import tsx --test tests/integration.test.ts",
+    "dev": "node --env-file-if-exists=.env --env-file-if-exists=tmp/local-db.env --import tsx apps/api/src/server.ts",
+    "db:migrate": "node --env-file-if-exists=.env --env-file-if-exists=tmp/local-db.env --import tsx scripts/migrate.ts",
+    "db:local": "node --import tsx scripts/local-db.ts",
     "audit:local": "node scripts/audit-local.mjs"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^10.3.0",
+    "fastify": "^5.12.7",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "embedded-postgres": "^18.4.0-beta.17",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@18.4.0-beta.17": true,
+    "esbuild@0.28.2": true
   }
 }

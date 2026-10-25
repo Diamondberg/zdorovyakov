@@ -30,4 +30,4 @@ for (const item of ['.env', '.env.*', '!.env.example', 'node_modules/', 'backups
   assert(ignores.includes(item), `Missing ignore ${item}`);
 }
 console.log(`PASS: ${required.length} required project files; safe configuration defaults and ignore rules.`);
-console.log('Scope: scaffold checks only; API, database, UI and email are not implemented or tested.');
+console.log('Scope: scaffold checks only; API/database tests run separately. UI and email are not tested here.');

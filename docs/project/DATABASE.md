@@ -1,6 +1,8 @@
-# Концептуальная схема БД
+# Схема БД
 
-Этап 1. Схема спроектирована; таблицы и исполняемые миграции будут на этапе 2.
+Этап 2. Схема реализована в db/migrations/001_core.sql; начальный каталог в 002.
+Таблицы имеют snake_case имена. Таблица ниже описывает логические сущности;
+точный DDL, типы, CHECK и индексы — в миграциях.
 PostgreSQL, UUID для внутренних ID, timestamptz UTC, денежные значения bigint
 в копейках (в API безопасные целые числа с проверкой диапазона), валюта RUB.
 Все FK индексируются по фактическим запросам; каскадное удаление заказов запрещено.
@@ -9,6 +11,7 @@ PostgreSQL, UUID для внутренних ID, timestamptz UTC, денежны
 |---|---|
 | Storefronts | id, slug UNIQUE, domain UNIQUE, allowed_origins, active |
 | Products | id, sku UNIQUE, name, retail_price_minor, purchase_price_minor, currency, active, weight_g, dimensions_mm, packaging; неподтверждённые размеры NULL |
+| StorefrontProducts | storefront_id + product_id PK/FK; явный ассортимент каждой витрины |
 | Customers | id, first_name, last_name, acquired_storefront_id FK, notes, created_at; не регистрируем аккаунт покупателя |
 | CustomerContacts | id, customer_id FK, kind email/phone, normalized_value, verified_at; UNIQUE(kind, normalized_value) WHERE email verified; телефон не уникальный идентификатор |
 | CustomerAddresses | id, customer_id FK, country, region, city, postal_code, address, pickup_point; отдельные изменяемые адреса |
@@ -60,6 +63,11 @@ OrderEvents/NotificationEvents; Products M:N Promotions через PromotionProd
 - Не удалять клиента вместе с историей продаж; срок хранения и обезличивание
   определить отдельно после проверки применимых требований.
 
-Миграции должны тестировать FK, уникальность, CHECK, снимки, идемпотентность и
-конкуренцию. Здесь нет утверждения, что эти ограничения уже реализованы.
+На PostgreSQL проверены миграции, CHECK, снимки, идемпотентность, конкуренция и
+транзакционное сохранение outbox. Сервисы email/статусов/отгрузок пока не реализованы:
+наличие таблиц не означает готовность последующих этапов.
 Бонусные балансы и реферальные таблицы в MVP не вводятся.
+
+Orders хранит items_subtotal_minor (до скидки), discount_minor и items_total_minor
+(после скидки). Округление sale_unit_price_minor до копейки half-up, затем умножение
+на количество; снимок закупочной цены остаётся внутренним.
